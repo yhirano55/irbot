@@ -1,0 +1,72 @@
+version: '2'
+
+services:
+  datastore:
+    container_name: datastore
+    image: busybox
+    volumes:
+      - redis:/data
+      - script:/script
+
+  redis:
+    container_name: redis
+    image: redis:latest
+    ports:
+      - '6379:6379'
+    volumes_from:
+      - datastore
+    networks:
+      - default
+
+  app:
+    container_name: app
+    build: &build
+      context: .
+      dockerfile: Dockerfile
+    command: bundle exec puma -C config/puma.rb
+    depends_on:
+      - redis
+      - ruby
+    ports:
+      - '3000:3000'
+    environment: &env
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      COMPOSE_HTTP_TIMEOUT: 900
+    networks:
+      - default
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    volumes_from:
+      - datastore
+    tty: true
+    stdin_open: true
+
+  worker:
+    container_name: worker
+    build:
+      <<: *build
+    command: bundle exec sidekiq -C config/sidekiq.yml -r ./lib/worker.rb
+    depends_on:
+      - redis
+      - ruby
+    environment:
+      <<: *env
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    volumes_from:
+      - datastore
+    networks:
+      - default
+
+  ruby:
+    container_name: ruby
+    image: ruby:latest
+    volumes_from:
+      - datastore
+
+volumes:
+  redis:
+    driver: local
+  script:
+    driver: local
